@@ -1,0 +1,287 @@
+/**
+ * Fonction générique pour initialiser une DataTable avec une barre d'outils et une barre d'état dynamique,
+ * en utilisant un ID de toolbar plutôt qu'une classe.
+ *
+ * @param {string} tableId - L'ID du tableau HTML à initialiser en tant que DataTable (ex: "maindatatable").
+ * @param {string} ajaxUrl - L'URL pour récupérer les données à afficher dans le tableau via AJAX.
+ * @param {Array} columns - Les colonnes à afficher dans le tableau, correspondant aux données reçues.
+ * @param {string} toolbarSelector - L'ID de la barre d'outils (avec un "#"), ex: "#vehiculesToolbar".
+ * @param {string} [dateCreateField='dateCreateString'] - Le champ représentant la date de création dans les données JSON.
+ * @param {string} [dateUpdateField='dateUpdateString'] - Le champ représentant la date de mise à jour dans les données JSON.
+ * @param {string} [stateField='State'] - Le champ représentant l'état dans les données JSON.
+ * @param {string} [stateButtonName='toggleStatusButton'] - L'ID du bouton qui doit être mis à jour lors du clic sur une ligne.
+ * @param {number} [activeValue=1] - La valeur de l'état "Actif" (par exemple 1 = "Validé").
+ * @param {string} [customSearchSelector=null] - L'ID d'un champ de recherche personnalisé (ex: "#searchInput").
+ * @param {function} onRowClick - Callback pour la gestion d'un clic sur une ligne du tableau, recevant les données de la ligne cliquée.
+ * @returns {DataTable} - L'instance DataTable créée.
+ */
+function initializeDataTable(
+    tableId,
+    ajaxUrl,
+    columns,
+    toolbarSelector,               // Doit inclure le '#', ex: '#vehiculesToolbar'
+    dateCreateField = 'dateCreateString',
+    dateUpdateField = 'dateUpdateString',
+    stateField = 'State',
+    stateButtonName = 'toggleStatusButton',
+    activeValue = 1,
+    customSearchSelector = null,
+    onRowClick
+) {
+    // Vérifier si les statusbars existent déjà pour éviter la duplication
+    if (!$('#statusbar_' + tableId).length) {
+        // Création dynamique des deux status bars
+        var statusbarHTML = `
+            <div id="statusbar_${tableId}" class="chrome-style-statusbar mb-3">
+                <table style="width: 100%;">
+                    <tr>
+                        <td style="text-align: left;">
+                            <span style="color:dimgray" id="lblPagination_${tableId}">Affichage de 0 à 0 sur 0 enregistrements</span>
+                        </td>
+                        <td style="text-align: right;">
+                            <div>
+                                <button id="firstButton_${tableId}" type="button" class="btn btn-chrome-style">
+                                    <i class="fas fa-angle-double-left"></i> Premier
+                                </button>
+                                <button id="previousButton_${tableId}" type="button" class="btn btn-chrome-style">
+                                    <i class="fas fa-angle-left"></i> Précédent
+                                </button>
+                                <button id="nextButton_${tableId}" type="button" class="btn btn-chrome-style">
+                                    <i class="fas fa-angle-right"></i> Suivant
+                                </button>
+                                <button id="lastButton_${tableId}" type="button" class="btn btn-chrome-style">
+                                    <i class="fas fa-angle-double-right"></i> Dernier
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <div id="statusbar2_${tableId}" class="chrome-style-statusbar2 mb-3" style="display: none;">
+                <table style="width: 100%;">
+                    <tr>
+                        <td style="text-align: left;">
+                            <span style="color:dimgray" id="lblDateCreate_${tableId}"></span>
+                        </td>
+                        <td style="text-align: left;">
+                            <span style="color:dimgray" id="lblDateUpdate_${tableId}"></span>
+                        </td>
+                        <td style="text-align: left;">
+                            <span id="lblState_${tableId}"></span>
+                        </td>
+                    </tr>
+                </table>
+            </div>`;
+
+        // Insérer les status bars juste après la table
+        $('#' + tableId).after(statusbarHTML);
+    }
+
+    // Initialisation de la DataTable
+    var dataTable = $('#' + tableId).DataTable({
+        // Inclure 'l' (length) dans la barre d'outils personnalisée, exclure 'f' (filter) et 'p' (pagination)
+        "dom": '<"toolbar' + tableId + '">lrt',  // 'l' est inclus dans la toolbar, 'f' et 'p' sont exclus
+        "processing": true,
+        "serverSide": true,
+        "ajax": {
+            "url": ajaxUrl,
+            "type": "POST",
+            "data": function (d) {
+                // Personnalisation des paramètres si nécessaire
+                d.draw = d.draw;
+                d.start = d.start;
+                d.length = d.length;
+            }
+        },
+        "language": {
+            "decimal": "",
+            "emptyTable": "Aucune donnée disponible dans le tableau",
+            "info": "", // Supprimer l'affichage d'info par défaut
+            "infoEmpty": "",
+            "infoFiltered": "",
+            "search": "Rechercher:",
+            "zeroRecords": "Aucun enregistrement correspondant trouvé",
+            "paginate": {
+                "first": "Premier",
+                "last": "Dernier",
+                "next": "Suivant",
+                "previous": "Précédent"
+            },
+            "lengthMenu": "Afficher _MENU_ enregistrements"
+        },
+        "columns": columns,
+        select: {
+            style: 'single'
+        },
+        "paging": true,
+        "searching": true, // Activer la recherche
+        "pageLength": 10,
+        "drawCallback": function (settings) {
+            var pageInfo = dataTable.page.info();
+            // Mise à jour de la barre d'état
+            $('#lblPagination_' + tableId).text(
+                'Affichage de ' + (pageInfo.start + 1) + ' à ' + pageInfo.end + ' sur ' + pageInfo.recordsTotal + ' enregistrements'
+            );
+            // Activer/désactiver les boutons de navigation
+            $('#firstButton_' + tableId + ', #previousButton_' + tableId).prop('disabled', pageInfo.page === 0);
+            $('#nextButton_' + tableId + ', #lastButton_' + tableId).prop('disabled', pageInfo.page === pageInfo.pages - 1);
+        },
+        "rowCallback": function (row, data) {
+            var stateValue = data[stateField]; // Récupération de la valeur de State
+            // Ajout d'une classe CSS en fonction de l'état
+            $(row).removeClass('state-draft state-validated state-locked state-deleted'); // Suppression des anciennes classes
+            if (stateValue === 0) {
+                $(row).addClass('state-draft'); // Brouillon
+            } else if (stateValue === 1) {
+                $(row).addClass('state-validated'); // Validé
+            } else if (stateValue === 2) {
+                $(row).addClass('state-locked'); // Verrouillé
+            } else if (stateValue === 3) {
+                $(row).addClass('state-deleted'); // Supprimé
+            }
+        },
+        initComplete: function () {
+            // Placer 'l' (length) dans la barre d'outils via ID
+            $('#' + tableId + '_length').appendTo(toolbarSelector);
+
+            // Si un sélecteur de recherche personnalisé est fourni, le lier à la recherche de DataTables
+            if (customSearchSelector) {
+                if (!customSearchSelector.startsWith('#')) {
+                    customSearchSelector = '#' + customSearchSelector;
+                }
+                // Liaison de l'input externe à la recherche DataTables
+                $(customSearchSelector).on('input', function () {
+                    dataTable.search(this.value).draw();
+                });
+            }
+        }
+    });
+
+    // Gestion des boutons de navigation personnalisés
+    $('#firstButton_' + tableId).off('click').on('click', function () {
+        dataTable.page('first').draw('page');
+    });
+
+    $('#previousButton_' + tableId).off('click').on('click', function () {
+        dataTable.page('previous').draw('page');
+    });
+
+    $('#nextButton_' + tableId).off('click').on('click', function () {
+        dataTable.page('next').draw('page');
+    });
+
+    $('#lastButton_' + tableId).off('click').on('click', function () {
+        dataTable.page('last').draw('page');
+    });
+
+    // Gestion du clic sur une ligne
+    $('#' + tableId + ' tbody').off('click').on('click', 'tr', function () {
+        var rowData = dataTable.row(this).data();
+        if (typeof onRowClick === 'function') {
+            onRowClick(rowData);  // Appel de la fonction callback lorsque la ligne est cliquée
+        }
+        updateToggleStatusButton(stateButtonName, activeValue);  // Met à jour le bouton d'état
+
+        // Sélectionner la ligne et désélectionner les autres
+        dataTable.$('tr.selected').removeClass('selected');
+        $(this).addClass('selected');
+
+        // Afficher statusbar2 et mettre à jour les dates et l'état avec gestion des types
+        $('#statusbar2_' + tableId).show();
+
+        var dateCreateValue = rowData[dateCreateField];
+        var dateUpdateValue = rowData[dateUpdateField];
+        var stateValue = rowData[stateField]; // Gestion du champ "State"
+
+        if (isValidDate(new Date(dateCreateValue))) {
+            $('#lblDateCreate_' + tableId).text('Créé le ' + new Date(dateCreateValue).toLocaleString());
+        } else {
+            $('#lblDateCreate_' + tableId).text(dateCreateValue);
+        }
+
+        if (isValidDate(new Date(dateUpdateValue))) {
+            $('#lblDateUpdate_' + tableId).text('Modifié le ' + new Date(dateUpdateValue).toLocaleString());
+        } else {
+            $('#lblDateUpdate_' + tableId).text(dateUpdateValue);
+        }
+
+        // Mise à jour de l'état avec style
+        $('#lblState_' + tableId)
+            .removeClass('state-label-draft state-label-validated state-label-locked state-label-deleted') // Suppression des anciennes classes
+            .addClass(getStateClass(stateValue)) // Ajout de la nouvelle classe en fonction de l'état
+            .text('État: ' + getStateLabel(stateValue)); // Mise à jour du texte de l'état
+    });
+
+    /**
+    * Met à jour le bouton Activer/Désactiver en fonction de l'état actuel de la ligne sélectionnée.
+    *
+    * @param {string} stateButtonName - L'ID du bouton qui doit être mis à jour (ex: "toggleStatusButton").
+    * @param {number} activeValue - La valeur de l'état "Actif" (ex: 1 = "Validé").
+    */
+    function updateToggleStatusButton(stateButtonName, activeValue) {
+        const toggleButton = $('#' + stateButtonName);
+
+        // Vérification que le bouton existe avant de continuer
+        if (toggleButton.length === 0) {
+            console.log('Le bouton de changement d\'état est introuvable.');
+            return;
+        }
+
+        // Vérifier si une ligne est sélectionnée et a une propriété 'state'
+        if (selectedRowData && typeof selectedRowData.state !== 'undefined') {
+            // Mise à jour du texte et de l'icône en fonction de l'état actuel
+            if (selectedRowData.state === activeValue) { // Comparer l'état actuel avec la valeur active
+                toggleButton.html('<i class="fas fa-toggle-off"></i> Désactiver');
+            } else {
+                toggleButton.html('<i class="fas fa-toggle-on"></i> Activer');
+            }
+
+            // Activer le bouton
+            toggleButton.prop('disabled', false);
+        }
+    }
+
+    /**
+     * Fonction pour vérifier si une date est valide
+     *
+     * @param {Date} d - La date à vérifier.
+     * @returns {boolean} - True si la date est valide, false sinon.
+     */
+    function isValidDate(d) {
+        return d instanceof Date && !isNaN(d);
+    }
+
+    /**
+     * Fonction pour mapper les valeurs d'état à l'énumération.
+     *
+     * @param {number} stateValue - La valeur de l'état à mapper.
+     * @returns {string} - Le libellé correspondant à l'état.
+     */
+    function getStateLabel(stateValue) {
+        switch (stateValue) {
+            case 0: return 'Draft';
+            case 1: return 'Validated';
+            case 2: return 'Locked';
+            case 3: return 'Deleted';
+            default: return 'Inconnu'; // Pour toute valeur inattendue
+        }
+    }
+
+    /**
+     * Fonction pour récupérer la classe CSS associée à l'état.
+     *
+     * @param {number} stateValue - La valeur de l'état à mapper.
+     * @returns {string} - La classe CSS correspondante.
+     */
+    function getStateClass(stateValue) {
+        switch (stateValue) {
+            case 0: return 'state-label-draft';
+            case 1: return 'state-label-validated';
+            case 2: return 'state-label-locked';
+            case 3: return 'state-label-deleted';
+            default: return '';
+        }
+    }
+
+    return dataTable; // On retourne l'instance DataTable
+}
